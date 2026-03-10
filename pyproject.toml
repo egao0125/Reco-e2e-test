@@ -1,0 +1,43 @@
+[project]
+name = "reco-e2e-test"
+version = "0.1.0"
+description = "Autonomous voice pipeline optimization system for Reco"
+requires-python = ">=3.10"
+
+dependencies = [
+    # Pipeline framework
+    "pipecat-ai[deepgram,openai,anthropic,elevenlabs,cartesia,google,silero]",
+
+    # Twilio
+    "twilio",
+
+    # STT providers
+    "deepgram-sdk",
+    "soniox",
+    "google-cloud-speech",
+
+    # LLM providers
+    "anthropic",
+    "openai",
+
+    # TTS providers
+    "elevenlabs",
+    "cartesia",
+
+    # Server
+    "fastapi",
+    "uvicorn",
+    "websockets",
+
+    # Utilities
+    "python-dotenv",
+    "httpx",
+    "aiohttp",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
