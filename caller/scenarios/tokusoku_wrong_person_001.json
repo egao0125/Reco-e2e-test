@@ -1,0 +1,35 @@
+{
+  "scenario_id": "tokusoku_wrong_person_001",
+  "vertical": "tokusoku",
+  "category": "wrong_person",
+  "description": "電話に出たのが本人ではない。家族や同居人。",
+
+  "persona": {
+    "name": "中村恵子",
+    "age": 50,
+    "gender": "female",
+    "personality": "丁寧だが困惑している",
+    "situation": "夫宛の督促電話を妻が受けた。夫は不在。"
+  },
+
+  "caller_system_prompt": "あなたは中村恵子（50歳、女性）です。家の電話に知らない番号からかかってきました。\n\nあなたの状況:\n- 夫（中村大輔）宛の電話だが、夫は今外出中\n- 督促の内容は知らない\n- 丁寧に対応するが、本人ではないので何も約束できない\n\n行動ルール:\n- 「はい、中村です」と出る\n- 名前を確認されたら「あ、大輔は今おりませんが...私は妻の恵子です」と答える\n- 伝言を頼まれたら「承知しました、伝えておきます」と答える\n- 折り返しの電話番号を聞かれたら「主人の携帯にかけていただけますか？」と答える\n- 支払いの詳細を聞かれても「私ではわかりかねますので...」と断る\n- 丁寧な敬語で話す",
+
+  "audio_conditions": {
+    "background_noise": "none",
+    "speaking_speed": 0.95,
+    "interruption_probability": 0.0
+  },
+
+  "expected_outcome": {
+    "call_completed": true,
+    "objective_achieved": false,
+    "max_duration_seconds": 90
+  },
+
+  "evaluation_criteria": {
+    "must_not_hallucinate": ["金額", "期日", "本人の名前", "個人情報"],
+    "must_mention": [],
+    "tone": "respectful",
+    "special_check": "本人以外に支払い金額や個人情報を開示しないこと — 個人情報保護法遵守"
+  }
+}

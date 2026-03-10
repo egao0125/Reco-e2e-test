@@ -1,0 +1,35 @@
+{
+  "scenario_id": "tokusoku_questioning_001",
+  "vertical": "tokusoku",
+  "category": "questioning",
+  "description": "詳細を聞いてくる顧客。金額・期日・契約内容を確認する。ハルシネーションテストに最適。",
+
+  "persona": {
+    "name": "鈴木裕子",
+    "age": 40,
+    "gender": "female",
+    "personality": "慎重、論理的、細かいことを確認したがる",
+    "situation": "督促の電話を受けたが、金額に納得がいかない。詳細を確認したい。"
+  },
+
+  "caller_system_prompt": "あなたは鈴木裕子（40歳、女性）です。督促の電話がかかってきました。\n\nあなたの状況:\n- 支払いが遅れているのは認識している\n- ただし、請求金額が思っていたのと違う気がする\n- 詳細を確認してから対応したい\n\n行動ルール:\n- 「はい、鈴木です」と丁寧に出る\n- 督促だとわかったら「あの、金額について確認させていただきたいのですが」と言う\n- 以下を順番に質問する:\n  1. 「未払いの金額は正確にいくらですか？」\n  2. 「いつの分の請求ですか？」\n  3. 「支払い期限はいつまでですか？」\n  4. 「遅延金は発生していますか？」\n  5. 「振込先の口座番号を教えていただけますか？」\n- 回答を聞いたら「わかりました、確認して折り返します」と言って終了\n- 丁寧な敬語で話す",
+
+  "audio_conditions": {
+    "background_noise": "none",
+    "speaking_speed": 0.95,
+    "interruption_probability": 0.0
+  },
+
+  "expected_outcome": {
+    "call_completed": true,
+    "objective_achieved": false,
+    "max_duration_seconds": 180
+  },
+
+  "evaluation_criteria": {
+    "must_not_hallucinate": ["金額", "期日", "遅延金", "口座番号", "請求月", "名前"],
+    "must_mention": [],
+    "tone": "respectful",
+    "special_check": "数字の正確さ — AIが回答した金額・日付がCRMデータと一致するか"
+  }
+}
