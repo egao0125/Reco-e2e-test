@@ -1,0 +1,128 @@
+name: monitor_agent
+role: 本番通話リアルタイム監視
+layer: 3
+
+description: >
+  本番通話のスコアを継続的に監視し、異常を検知したらSlackアラートを送信する。
+  日次サマリーレポートを生成する。ロールバック閾値を超えた場合は
+  自動でconfigを前のバージョンに戻す。
+
+input:
+  scores:
+    type: jsonl
+    source: scores/scores.jsonl
+    mode: tail（新規行を継続的に監視）
+
+  config_history:
+    type: jsonl
+    source: configs/config_history.jsonl
+
+  current_config:
+    type: json
+    source: configs/current_config.json
+
+  experiments:
+    type: tsv
+    source: experiments/experiments.tsv
+
+output:
+  alerts:
+    type: slack_message
+    destination:
+      critical: "#reco-alerts"
+      experiment: "#reco-experiments"
+      daily: "#reco-daily"
+      proposal: "#reco-proposals"
+
+  daily_report:
+    type: json + slack_message
+    destination: scores/daily_reports/{date}.json + "#reco-daily"
+
+  rollback:
+    type: config_change
+    destination: configs/current_config.json
+    trigger: ロールバック閾値超過時
+
+alert_thresholds:
+  hallucination_rate:
+    warning: 0.0    # 0%超で警告（1件でも通知）
+    rollback: 0.02  # 2%超で自動ロールバック
+    window: 24h
+
+  latency_p95:
+    warning: 600    # 600ms超で警告
+    rollback: 800   # 800ms超で自動ロールバック
+    window: 24h
+    unit: ms
+
+  naturalness_mean:
+    warning: 7.5    # 7.5未満で警告
+    rollback: 7.0   # 7.0未満で自動ロールバック
+    window: 24h
+
+  call_completion_rate:
+    warning: 0.80   # 80%未満で警告
+    rollback: 0.70  # 70%未満で自動ロールバック
+    window: 24h
+
+behavior:
+  monitoring:
+    - scores.jsonlを継続的に監視（cronで5分ごと、またはdaemon）
+    - 新規スコアが追加されるたびにアラート閾値をチェック
+    - 過去24時間のスライディングウィンドウで集計
+
+  alert_escalation:
+    - ハルシネーション検出: 即時Slack通知（#reco-alerts）
+      format: >
+        🚨 ハルシネーション検出
+        Call: {call_id}
+        Type: {type} (STT/LLM/TTS)
+        詳細: {details}
+        Config: {config_variant}
+
+    - ロールバック実行: 即時Slack通知（#reco-alerts）
+      format: >
+        ⚠️ 自動ロールバック実行
+        原因: {threshold_name} が {value} に悪化（閾値: {threshold}）
+        戻し先: config version {previous_version}
+        影響通話数: {affected_calls}
+
+    - 実験結果: 通常通知（#reco-experiments）
+      format: >
+        📊 実験 {experiment_id} 結果
+        仮説: {hypothesis}
+        変更: {knob} = {old} → {new}
+        A群: {a_calls}通話, B群: {b_calls}通話
+        ハルシネ: {halluc_a}% vs {halluc_b}%
+        レイテンシP95: {lat_a}ms vs {lat_b}ms
+        自然さ: {nat_a} vs {nat_b}
+        判定: {decision}
+
+  daily_report:
+    trigger: 毎日09:00 JST
+    format: >
+      📊 Reco Daily Report — {date}
+
+      通話数: {total_calls}（テスト: {test}, 本番: {prod}）
+      ハルシネーション: {halluc_count}件 ({halluc_rate}%)
+      レイテンシ P95: {latency_p95}ms
+      自然さ平均: {naturalness_mean}/10
+      通話完了率: {completion_rate}%
+
+      実験中: {active_experiment}
+      前日比: ハルシネ {halluc_delta}, レイテンシ {latency_delta}, 自然さ {naturalness_delta}
+
+  rollback:
+    trigger: いずれかのロールバック閾値を超過
+    action:
+      - configs/current_config.json を config_history の前のバージョンに復元
+      - Slackに即時通知
+      - 進行中のA/Bテストを中止
+      - experiments.tsvに「rollback」として記録
+    approval: 不要（自動実行、人間の承認を待たない）
+
+constraints:
+  - 監視の遅延: 最大5分（cronの場合）
+  - ロールバックの実行: 検知から1分以内
+  - Slack通知の失敗はログに記録して続行（通知失敗でロールバックを止めない）
+  - 日次レポートは過去24時間のデータが最低10通話ないと生成しない

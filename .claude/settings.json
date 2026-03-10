@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Execute"
+    ],
+    "deny": []
+  },
+  "model": "opus"
+}

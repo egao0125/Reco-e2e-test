@@ -1,0 +1,96 @@
+name: caller_agent
+role: 偽顧客AI（テストコール発信者）
+layer: 1
+
+description: >
+  シナリオに沿ってTwilio Media Streams経由でRecoに電話をかけ、
+  顧客として会話する。通話終了後に録音とトランスクリプトを
+  scoring agentに渡す。
+
+input:
+  scenario:
+    type: json
+    source: caller/scenarios/*.json
+    contains:
+      - persona（名前、年齢、性格、状況）
+      - caller_system_prompt（顧客役のLLMプロンプト）
+      - audio_conditions（背景ノイズ、話速、割り込み確率）
+      - expected_outcome（通話完了、目的達成の期待値）
+      - evaluation_criteria（ハルシネチェック対象フィールド）
+
+  target:
+    type: config
+    contains:
+      - test_phone_number（Recoテスト用Twilio番号）
+      - config_variant（"A" or "B" — A/Bテスト指定）
+
+output:
+  recording:
+    type: wav
+    destination: scores/recordings/{call_id}.wav
+    source: Twilio Recording API
+
+  transcript:
+    type: json
+    destination: scores/transcripts/{call_id}.json
+    schema:
+      call_id: string
+      timestamp: datetime
+      config_variant: string
+      scenario_id: string
+      turns:
+        - speaker: "customer" | "agent"
+          text: string
+          timestamp: float
+          stt_confidence: float
+
+  call_metadata:
+    type: json
+    destination: scores/metadata/{call_id}.json
+    schema:
+      call_id: string
+      scenario_id: string
+      config_variant: string
+      duration_seconds: float
+      termination_reason: "completed" | "timeout" | "hangup" | "error"
+      twilio_call_sid: string
+
+pipeline:
+  framework: pipecat
+  connection: twilio_media_streams
+  audio_format: 8kHz mulaw
+  components:
+    stt: deepgram_nova3
+    llm: anthropic_haiku  # 顧客役は軽量モデルで十分
+    tts: elevenlabs  # Recoと異なるvoice_idを使用
+
+behavior:
+  call_initiation:
+    - Twilio REST API でアウトバウンドコール発信
+    - From: テスト用Twilio番号
+    - To: Recoテスト用Twilio番号
+    - TwiML webhookでMedia Streams接続を確立
+
+  conversation:
+    - シナリオのcaller_system_promptに従って会話
+    - audio_conditionsに基づいて音声フィルタを適用
+    - 割り込み確率に基づいてバージインをシミュレート
+    - 沈黙シナリオでは指定秒数の無音を挿入
+
+  termination:
+    - expected_outcome.max_duration_seconds経過で自動終了
+    - シナリオの目的達成で自然に終了
+    - エラー発生時はログを残して終了
+
+  post_call:
+    - Twilio Recording APIで録音を取得
+    - トランスクリプトをJSON保存
+    - call_metadataをJSON保存
+    - scoring agentにcall_idを通知
+
+constraints:
+  - 本番Twilio番号には絶対に発信しない（テスト番号のみ）
+  - 同時実行数: 最大10並列
+  - 1通話: 最大3分
+  - 通話間隔: 最低2秒（Twilio rate limit対策）
+  - API keys: 環境変数から読み込み、コードにハードコードしない

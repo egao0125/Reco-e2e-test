@@ -1,0 +1,151 @@
+name: scorer_agent
+role: 通話品質自動採点
+layer: 2
+
+description: >
+  通話の録音・トランスクリプト・メタデータを入力として、
+  3軸（ハルシネーション・レイテンシ・自然さ）で自動採点する。
+  テストコールと本番通話の両方を同じ基準で採点する。
+
+input:
+  recording:
+    type: wav
+    source: scores/recordings/{call_id}.wav
+
+  transcript:
+    type: json
+    source: scores/transcripts/{call_id}.json
+
+  call_metadata:
+    type: json
+    source: scores/metadata/{call_id}.json
+
+  latency_log:
+    type: json
+    source: scores/latency/{call_id}.json
+    required: false  # Reco側の計装がないと存在しない
+
+  flow_definition:
+    type: json
+    source: Recoの会話フロー定義（call_metadataから紐づけ）
+    required: false  # テストコールでは利用可能、本番は要連携
+
+  crm_data:
+    type: json
+    source: Recoが通話時に参照したCRMデータ
+    required: false
+
+output:
+  score:
+    type: json
+    destination: scores/scores.jsonl (append)
+    schema:
+      call_id: string
+      timestamp: datetime
+      config_variant: string
+      source: "test" | "production"
+
+      hallucination:
+        type1_stt:
+          detected: boolean
+          count: integer
+          details: list
+        type2_llm:
+          detected: boolean
+          count: integer
+          details: list  # {ai_utterance, source_data, reason, severity}
+        type3_tts:
+          detected: boolean
+          count: integer
+          details: list
+        total_detected: boolean
+        total_count: integer
+
+      latency:
+        available: boolean
+        perceived_ms: {mean, p50, p95, max}
+        per_stage: {vad_to_stt, stt_to_llm, llm_ttfb, tts_ttfb}
+
+      naturalness:
+        score: integer  # 1-10
+        breakdown:
+          keigo: integer      # 0-3
+          tempo: integer      # 0-2
+          aizuchi: integer    # 0-2
+          objective: integer  # 0-2
+          impression: integer # 0-1
+        feedback: string
+        worst_utterance: string
+        best_utterance: string
+
+      meta:
+        duration_seconds: float
+        call_completed: boolean
+        objective_achieved: boolean
+
+scoring_methods:
+  hallucination_type1_stt:
+    method: re-transcription comparison
+    steps:
+      - 録音を高精度STT（Whisper large-v3 or Soniox）で再書き起こし
+      - 本番STT出力と再書き起こしを比較
+      - CER > 閾値 の発話をフラグ
+      - 無音区間でのSTT出力（silence hallucination）を検出
+    cost_per_call: ~¥1（STT API呼び出し）
+
+  hallucination_type2_llm:
+    method: LLM-as-judge
+    model: claude-haiku-4-5
+    steps:
+      - AI発話テキストを抽出
+      - 各発話をフロー定義 + CRMデータ + STT書き起こしと照合
+      - 根拠のない情報（金額、日付、名前、約束）を検出
+      - severity: critical（金額・日付間違い）/ minor（ニュアンスの差）
+    cost_per_call: ~¥0.5（Haiku API呼び出し）
+
+  hallucination_type3_tts:
+    method: TTS output re-transcription
+    steps:
+      - TTS出力音声（またはReco側の送信音声）を再度STTにかける
+      - STTテキストとLLM出力テキストを比較
+      - 数字・固有名詞の読み間違いを検出
+    cost_per_call: ~¥1（STT API呼び出し）
+
+  latency:
+    method: timestamp extraction
+    steps:
+      - Reco側のレイテンシログから5つのタイムスタンプを抽出
+      - 各ステージのレイテンシを計算
+      - 通話全ターンのP50/P95/maxを算出
+    cost_per_call: ¥0（ログ解析のみ）
+
+  naturalness:
+    method: LLM-as-judge
+    model: claude-haiku-4-5
+    steps:
+      - 通話書き起こし全文を入力
+      - 5項目で採点（keigo, tempo, aizuchi, objective, impression）
+      - 具体的な改善コメントを生成
+      - 最も不自然/自然だった発話を特定
+    cost_per_call: ~¥0.5（Haiku API呼び出し）
+
+behavior:
+  trigger:
+    - caller agentから通話完了通知を受け取った時（テストコール）
+    - cronで新規録音を検出した時（本番通話）
+
+  execution:
+    - 3軸を並列で採点（独立しているため）
+    - 全結果をscores.jsonlに1行で追記
+    - ハルシネーション検出時はalert agentに即時通知
+
+  error_handling:
+    - STT re-transcription失敗 → Type1/3はスキップ、available=falseで記録
+    - レイテンシログ不在 → latency.available=false で記録
+    - LLM-as-judge失敗 → リトライ1回、それでも失敗なら score=null で記録
+
+constraints:
+  - 採点は通話終了後5分以内に完了する
+  - scores.jsonlへの書き込みはアトミック（途中で壊れない）
+  - 採点コスト: 1通話あたり最大¥3
+  - LLM-as-judgeの温度は0（再現性のため）

@@ -1,0 +1,181 @@
+name: orchestrator_agent
+role: 自律最適化メタエージェント
+layer: 4
+
+description: >
+  Recoの音声パイプラインを自律的に最適化する。
+  スコアデータを観察し、問題を診断し、仮説を立て、
+  実験を設計・実行・評価する。人間はゴールだけ定義し、
+  何を変えるか・どう変えるか・いつ変えるかは
+  このエージェントが判断する。
+
+input:
+  scores:
+    type: jsonl
+    source: scores/scores.jsonl
+
+  experiments:
+    type: tsv
+    source: experiments/experiments.tsv
+
+  current_config:
+    type: json
+    source: configs/current_config.json
+
+  config_history:
+    type: jsonl
+    source: configs/config_history.jsonl
+
+goals:
+  hallucination:
+    target: 0%
+    priority: 1（最優先）
+    metric: hallucination.total_count / total_calls
+
+  latency:
+    target: P95 < 500ms
+    priority: 2
+    metric: latency.perceived_ms.p95
+
+  naturalness:
+    target: mean > 8.0/10
+    priority: 3
+    metric: naturalness.score mean
+
+output:
+  candidate_config:
+    type: json
+    destination: configs/candidate_config.json
+
+  experiment_log:
+    type: tsv_row
+    destination: experiments/experiments.tsv (append)
+
+  test_instructions:
+    type: command
+    destination: caller agent（テストコール実行指示）
+
+  proposals:
+    type: slack_message
+    destination: "#reco-proposals"（人間の承認が必要な変更）
+
+exploration_axes:
+  axis1_parameters:
+    description: 各プロバイダの設定値を変更
+    risk: 低
+    speed: 即時実行可能
+    examples:
+      - stt.keywords
+      - stt.endpointing
+      - llm.temperature
+      - llm.max_tokens
+      - tts.stability
+      - tts.chunk_strategy
+      - orchestration.vad_threshold
+      - orchestration.audio_buffer_ms
+
+  axis2_models:
+    description: プロバイダ/モデルを切り替え
+    risk: 中
+    speed: オフライン評価が先
+    options:
+      stt:
+        - deepgram_nova3
+        - soniox_v4
+        - google_chirp2
+        - openai_gpt4o_transcribe
+        - faster_whisper（GPU必要）
+      llm:
+        - anthropic_haiku
+        - anthropic_sonnet
+        - openai_gpt4o_mini
+        - openai_gpt4o
+      tts:
+        - elevenlabs
+        - cartesia_sonic3
+        - style_bert_vits2（GPU必要）
+        - openai_tts
+
+  axis3_architecture:
+    description: パイプラインの構造を変更
+    risk: 高
+    speed: モジュールが実装済みならconfig切り替え、未実装なら人間に依頼
+    options:
+      - nbest_enabled: true/false
+      - confidence_routing_enabled: true/false
+      - speculative_prefill_enabled: true/false
+      - hallucination_guard_enabled: true/false
+      - ssml_injection_enabled: true/false
+      - rag_enabled: true/false
+      - end_to_end_mode: true/false
+
+behavior:
+  cycle:
+    name: OBSERVE → DIAGNOSE → HYPOTHESIZE → PLAN → TEST → EVALUATE → DECIDE → LOG
+    frequency: 実験完了後に次のサイクルを開始（最短2日/実験）
+
+    observe:
+      - scores.jsonl から過去24-48時間のスコアを集計
+      - 3軸それぞれの現在値を算出
+      - トレンド（改善中/悪化中/横ばい）を判定
+
+    diagnose:
+      - 3つのゴールのうち、目標から最も遠いものを特定
+      - 原因を推定:
+        - ハルシネ → どのTypeが多い？ → STT/LLM/TTSのどこが原因？
+        - レイテンシ → どのステージがボトルネック？
+        - 自然さ → どの項目（keigo/tempo/aizuchi/objective/impression）が低い？
+
+    hypothesize:
+      - 診断結果から改善仮説を1つ立てる
+      - 3つの探索軸のどれで対処するか決定
+      - 探索優先順位: axis1 → axis2 → axis3（ただしデータが構造的問題を示す場合は飛ばせる）
+
+    plan:
+      - candidate_config.json を生成（current_configから1箇所だけ変更）
+      - 変更内容と期待される改善を experiments.tsv に記録
+
+    test:
+      - axis1（パラメータ）: 直接テストコール実行
+      - axis2（モデル）: まずオフライン評価（eval/offline_eval.py）→ パスしたらテストコール
+      - axis3（アーキテクチャ）: モジュールが実装済みならテストコール、未実装なら#reco-proposalsに提案
+      - テストコール: candidate_configで400通話、current_configで400通話
+
+    evaluate:
+      - A群（current）vs B群（candidate）のスコアを比較
+      - 統計的有意差の判定
+      - ハルシネーション率が上昇していないことを確認
+
+    decide:
+      - 改善かつハルシネ増加なし → 採用（candidate → current に昇格）
+      - 改善だがハルシネ増加 → 棄却
+      - 改善なし → 棄却
+      - 悪化 → 棄却
+
+    log:
+      - experiments.tsv に全結果を記録（採用・棄却とも）
+      - config_history.jsonl に変更を記録（採用時のみ）
+      - #reco-experiments に結果を通知
+
+  human_escalation:
+    triggers:
+      - GPU必要なモデルを試したい → インスタンス起動を依頼
+      - 未実装のアーキテクチャモジュールが必要 → 実装を依頼
+      - 月額2万円超のコスト増が見込まれる → 承認を依頼
+      - 全探索軸で改善が頭打ち → 新しいアプローチの相談
+    channel: "#reco-proposals"
+    format: >
+      💡 提案: {proposal_title}
+      理由: {data_driven_reasoning}
+      期待効果: {expected_improvement}
+      コスト: {cost_estimate}
+      必要な作業: {required_action}
+
+constraints:
+  - 1実験につき1変更のみ
+  - A/B各群最低400通話
+  - ハルシネーション増加は即座に棄却（他の改善があっても）
+  - ロールバックはmonitor agentが自動実行（orchestratorは関与しない）
+  - 探索の順序に厳密な制約はないが、低コスト/低リスクの軸を先に試すことを推奨
+  - 全実験を記録する（成功も失敗も）
+  - 過去の実験結果を参照して同じ失敗を繰り返さない（ただしprior knowledgeとしてハードコードしない — データから学ぶ）
