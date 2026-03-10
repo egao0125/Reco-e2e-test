@@ -1,0 +1,1 @@
+date	experiment_id	hypothesis	knob_changed	old_value	new_value	variant_a_calls	variant_b_calls	hallucination_a	hallucination_b	latency_p95_a	latency_p95_b	naturalness_a	naturalness_b	decision	notes

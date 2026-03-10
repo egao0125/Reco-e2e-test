@@ -1,0 +1,66 @@
+{
+  "_version": "0.1",
+  "_updated_at": "2026-03-10T00:00:00Z",
+  "_description": "Baseline config — autoresearch結果反映済み",
+
+  "stt": {
+    "provider": "deepgram",
+    "model": "nova-3",
+    "language": "ja",
+    "punctuate": false,
+    "smart_format": false,
+    "endpointing": 300,
+    "encoding": "linear16",
+    "sample_rate": 8000,
+    "keywords": ["Wi-Fi:5", "センチ:3"],
+    "nbest": {
+      "enabled": true,
+      "n": 3,
+      "selection": "rule_based_v1"
+    }
+  },
+
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "temperature": 0.7,
+    "max_tokens": 256,
+    "system_prompt_path": "per_customer",
+    "conversation_history": "full"
+  },
+
+  "tts": {
+    "provider": "elevenlabs",
+    "model": "eleven_turbo_v2_5",
+    "voice_id": "TODO",
+    "stability": 0.5,
+    "similarity_boost": 0.75,
+    "chunk_strategy": "sentence"
+  },
+
+  "orchestration": {
+    "vad_threshold": 0.5,
+    "vad_min_silence_ms": 300,
+    "barge_in_enabled": true,
+    "speculative_prefill": true,
+    "audio_buffer_ms": 200
+  },
+
+  "architecture": {
+    "nbest_enabled": true,
+    "nbest_n": 3,
+    "confidence_routing_enabled": false,
+    "confidence_routing_threshold": 0.6,
+    "confidence_routing_fallback_provider": "soniox",
+    "speculative_prefill_enabled": true,
+    "speculative_prefill_trigger_percent": 0.7,
+    "hallucination_guard_enabled": false,
+    "hallucination_guard_model": "claude-haiku-4-5",
+    "ssml_injection_enabled": false,
+    "ssml_injection_targets": ["numbers", "proper_nouns"],
+    "rag_enabled": false,
+    "rag_knowledge_base": "crm",
+    "end_to_end_mode": false,
+    "end_to_end_provider": "openai_realtime"
+  }
+}
